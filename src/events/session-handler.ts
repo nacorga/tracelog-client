@@ -1,11 +1,4 @@
-export interface SessionData {
-  sessionId: string;
-  startTime: number;
-  lastActivity: number;
-  endTrigger?: string;
-}
-
-export type SessionEndTrigger = 'timeout' | 'manual' | 'page_unload' | 'unexpected_recovery';
+import { SessionData, SessionEndTrigger } from '../types';
 
 interface HeartbeatData {
   sessionId: string;
@@ -48,6 +41,7 @@ class SafeLocalStorage implements StorageManager {
       if (this.available) {
         // Check available space before writing
         const estimatedSize = serialized.length + key.length;
+
         if (estimatedSize > 1024 * 1024) {
           // 1MB limit
           console.warn('[TraceLog] Data too large for localStorage, using memory fallback');
@@ -120,12 +114,14 @@ class SafeLocalStorage implements StorageManager {
       if (this.available) {
         // Only clear TraceLog keys
         const keys = Object.keys(window.localStorage);
+
         for (const key of keys) {
           if (key.startsWith('tracelog_') || key.includes('_critical_events') || key.includes('_heartbeat')) {
             window.localStorage.removeItem(key);
           }
         }
       }
+
       this.memoryFallback.clear();
     } catch {
       console.warn('[TraceLog] localStorage clear failed');
@@ -136,18 +132,22 @@ class SafeLocalStorage implements StorageManager {
     try {
       if (this.available) {
         let size = 0;
+
         for (const key in window.localStorage) {
           if (key.startsWith('tracelog_') || key.includes('_critical_events') || key.includes('_heartbeat')) {
             size += window.localStorage.getItem(key)?.length || 0;
           }
         }
+
         return size;
       }
 
       let size = 0;
+
       for (const value of this.memoryFallback.values()) {
         size += value.length;
       }
+
       return size;
     } catch {
       return 0;
@@ -166,6 +166,7 @@ class SafeLocalStorage implements StorageManager {
         if (key.includes('_heartbeat') || key.includes('_critical_events')) {
           try {
             const data = JSON.parse(window.localStorage.getItem(key) || '{}');
+
             if (data.timestamp && data.timestamp < cutoffTime) {
               window.localStorage.removeItem(key);
             }
@@ -232,10 +233,6 @@ export class SessionHandler {
     this.sessionData = sessionData;
     this.startHeartbeat();
     this.onSessionChange(sessionData);
-
-    if (this.isQaMode()) {
-      console.log('[TraceLog] Session started:', sessionData.sessionId);
-    }
 
     return sessionData;
   }

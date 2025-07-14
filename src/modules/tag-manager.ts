@@ -1,12 +1,8 @@
-import { TracelogTagCondition, TracelogEventClickData } from '../types';
-import { DeviceType } from '../constants';
+import { DeviceType, TagCondition, EventClickData, TagConditionType, TagConditionOperator } from '../types';
 
 export class TagManager {
-  /**
-   * Matches URL-based conditions against a given URL
-   */
-  static matchUrlMatches(condition: TracelogTagCondition, url: string): boolean {
-    if (condition.type !== 'url_matches') {
+  static matchUrlMatches(condition: TagCondition, url: string): boolean {
+    if (condition.type !== TagConditionType.URL_MATCHES) {
       return false;
     }
 
@@ -14,37 +10,29 @@ export class TagManager {
     const targetUrl = condition.caseSensitive ? url : url.toLowerCase();
 
     switch (condition.operator) {
-      case 'equals': {
+      case TagConditionOperator.EQUALS: {
         return targetUrl === targetValue;
       }
 
-      case 'not_equals': {
-        return targetUrl !== targetValue;
-      }
-
-      case 'contains': {
+      case TagConditionOperator.CONTAINS: {
         return targetUrl.includes(targetValue);
       }
 
-      case 'not_contains': {
-        return !targetUrl.includes(targetValue);
-      }
-
-      case 'starts_with': {
+      case TagConditionOperator.STARTS_WITH: {
         return targetUrl.startsWith(targetValue);
       }
 
-      case 'ends_with': {
+      case TagConditionOperator.ENDS_WITH: {
         return targetUrl.endsWith(targetValue);
       }
 
-      case 'regex': {
+      case TagConditionOperator.REGEX: {
         try {
           const flags = condition.caseSensitive ? 'g' : 'gi';
           const regex = new RegExp(targetValue, flags);
+
           return regex.test(targetUrl);
         } catch {
-          // Invalid regex - return false
           return false;
         }
       }
@@ -55,11 +43,8 @@ export class TagManager {
     }
   }
 
-  /**
-   * Matches device type conditions
-   */
-  static matchDeviceType(condition: TracelogTagCondition, deviceType: DeviceType): boolean {
-    if (condition.type !== 'device_type') {
+  static matchDeviceType(condition: TagCondition, deviceType: DeviceType): boolean {
+    if (condition.type !== TagConditionType.DEVICE_TYPE) {
       return false;
     }
 
@@ -67,31 +52,23 @@ export class TagManager {
     const targetDevice = condition.caseSensitive ? deviceType : deviceType.toLowerCase();
 
     switch (condition.operator) {
-      case 'equals': {
+      case TagConditionOperator.EQUALS: {
         return targetDevice === targetValue;
       }
 
-      case 'not_equals': {
-        return targetDevice !== targetValue;
-      }
-
-      case 'contains': {
+      case TagConditionOperator.CONTAINS: {
         return targetDevice.includes(targetValue);
       }
 
-      case 'not_contains': {
-        return !targetDevice.includes(targetValue);
-      }
-
-      case 'starts_with': {
+      case TagConditionOperator.STARTS_WITH: {
         return targetDevice.startsWith(targetValue);
       }
 
-      case 'ends_with': {
+      case TagConditionOperator.ENDS_WITH: {
         return targetDevice.endsWith(targetValue);
       }
 
-      case 'regex': {
+      case TagConditionOperator.REGEX: {
         try {
           const flags = condition.caseSensitive ? 'g' : 'gi';
           const regex = new RegExp(targetValue, flags);
@@ -107,15 +84,11 @@ export class TagManager {
     }
   }
 
-  /**
-   * Matches element selector conditions against click data
-   */
-  static matchElementSelector(condition: TracelogTagCondition, clickData: TracelogEventClickData): boolean {
-    if (condition.type !== 'element_matches') {
+  static matchElementSelector(condition: TagCondition, clickData: EventClickData): boolean {
+    if (condition.type !== TagConditionType.ELEMENT_MATCHES) {
       return false;
     }
 
-    // Extract all relevant element data for matching
     const elementData = [
       clickData.elementId ?? '',
       clickData.elementClass ?? '',
@@ -126,7 +99,6 @@ export class TagManager {
       clickData.elementAlt ?? '',
       clickData.elementRole ?? '',
       clickData.elementAriaLabel ?? '',
-      // Include data attributes as well
       ...Object.values(clickData.elementDataAttributes ?? {}),
     ].join(' ');
 
@@ -134,32 +106,23 @@ export class TagManager {
     const targetElementData = condition.caseSensitive ? elementData : elementData.toLowerCase();
 
     switch (condition.operator) {
-      case 'equals': {
-        // For elements, check if any individual field equals the value
+      case TagConditionOperator.EQUALS: {
         return this.checkElementFieldEquals(clickData, targetValue, condition.caseSensitive);
       }
 
-      case 'not_equals': {
-        return !this.checkElementFieldEquals(clickData, targetValue, condition.caseSensitive);
-      }
-
-      case 'contains': {
+      case TagConditionOperator.CONTAINS: {
         return targetElementData.includes(targetValue);
       }
 
-      case 'not_contains': {
-        return !targetElementData.includes(targetValue);
-      }
-
-      case 'starts_with': {
+      case TagConditionOperator.STARTS_WITH: {
         return targetElementData.startsWith(targetValue);
       }
 
-      case 'ends_with': {
+      case TagConditionOperator.ENDS_WITH: {
         return targetElementData.endsWith(targetValue);
       }
 
-      case 'regex': {
+      case TagConditionOperator.REGEX: {
         try {
           const flags = condition.caseSensitive ? 'g' : 'gi';
           const regex = new RegExp(targetValue, flags);
@@ -175,11 +138,12 @@ export class TagManager {
     }
   }
 
-  /**
-   * Matches UTM parameter conditions
-   */
-  static matchUtmCondition(condition: TracelogTagCondition, utmValue: string | undefined): boolean {
-    if (!['utm_source', 'utm_medium', 'utm_campaign'].includes(condition.type)) {
+  static matchUtmCondition(condition: TagCondition, utmValue: string | undefined): boolean {
+    if (
+      ![TagConditionType.UTM_SOURCE, TagConditionType.UTM_MEDIUM, TagConditionType.UTM_CAMPAIGN].includes(
+        condition.type,
+      )
+    ) {
       return false;
     }
 
@@ -188,31 +152,23 @@ export class TagManager {
     const targetUtmValue = condition.caseSensitive ? value : value.toLowerCase();
 
     switch (condition.operator) {
-      case 'equals': {
+      case TagConditionOperator.EQUALS: {
         return targetUtmValue === targetValue;
       }
 
-      case 'not_equals': {
-        return targetUtmValue !== targetValue;
-      }
-
-      case 'contains': {
+      case TagConditionOperator.CONTAINS: {
         return targetUtmValue.includes(targetValue);
       }
 
-      case 'not_contains': {
-        return !targetUtmValue.includes(targetValue);
-      }
-
-      case 'starts_with': {
+      case TagConditionOperator.STARTS_WITH: {
         return targetUtmValue.startsWith(targetValue);
       }
 
-      case 'ends_with': {
+      case TagConditionOperator.ENDS_WITH: {
         return targetUtmValue.endsWith(targetValue);
       }
 
-      case 'regex': {
+      case TagConditionOperator.REGEX: {
         try {
           const flags = condition.caseSensitive ? 'g' : 'gi';
           const regex = new RegExp(targetValue, flags);
@@ -228,11 +184,8 @@ export class TagManager {
     }
   }
 
-  /**
-   * Helper method to check if any element field equals the target value
-   */
   private static checkElementFieldEquals(
-    clickData: TracelogEventClickData,
+    clickData: EventClickData,
     targetValue: string,
     caseSensitive?: boolean,
   ): boolean {
@@ -248,18 +201,17 @@ export class TagManager {
       clickData.elementAriaLabel,
     ];
 
-    // Check main fields
     for (const field of fields) {
       if (field) {
         const fieldValue = caseSensitive ? field : field.toLowerCase();
         const target = caseSensitive ? targetValue : targetValue.toLowerCase();
+
         if (fieldValue === target) {
           return true;
         }
       }
     }
 
-    // Check data attributes
     if (clickData.elementDataAttributes) {
       for (const dataValue of Object.values(clickData.elementDataAttributes)) {
         const fieldValue = caseSensitive ? dataValue : dataValue.toLowerCase();

@@ -1,15 +1,16 @@
 {
+  "include": ["src/**/*", "tests/**/*"],
+  "exclude": ["node_modules", "vite.config.ts"],
   "compilerOptions": {
     "lib": ["dom", "es2022"],
     "module": "commonjs",
     "target": "es2022",
     "strict": true,
     "esModuleInterop": true,
+    "resolveJsonModule": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "dist",
-    "declaration": true,
+    "declaration": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules"]
 }

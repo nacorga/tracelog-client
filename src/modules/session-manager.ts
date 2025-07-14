@@ -1,9 +1,8 @@
-import { LSKey, DEFAULT_SAMPLING_RATE, DeviceType } from '../constants';
+import { DEFAULT_SAMPLING_RATE } from '../constants';
+import { MetadataType, Config, EventType, SessionData, SessionEndTrigger, DeviceType, StorageKey } from '../types';
+import { getDeviceType, isValidMetadata } from '../utils';
+import { SessionHandler } from '../events';
 import { IdManager } from './id-manager';
-import { MetadataType, TracelogConfig, EventType } from '../types';
-import { getDeviceType } from '../utils/device-detector';
-import { isValidMetadata } from '../utils/event-check';
-import { SessionHandler, SessionData, SessionEndTrigger } from '../events/session-handler';
 
 export class SessionManager {
   private userId: string | undefined;
@@ -15,14 +14,12 @@ export class SessionManager {
   private pageUnloading = false;
 
   constructor(
-    private readonly config: TracelogConfig,
+    private readonly config: Config,
     private readonly sendSessionEvent: (eventType: EventType, trigger?: string) => void,
     private readonly isQaMode: () => boolean,
   ) {
     this.userId = this.getUserId();
     this.device = getDeviceType();
-
-    // Initialize session handler
     this.sessionHandler = new SessionHandler(this.userId, this.handleSessionData.bind(this), this.isQaMode);
   }
 
@@ -30,12 +27,11 @@ export class SessionManager {
     this.validateGlobalMetadata();
   }
 
-  // Getters
   getUserId(): string {
     if (this.userId) return this.userId;
 
     try {
-      const storedId = window.localStorage.getItem(LSKey.UserId);
+      const storedId = window.localStorage.getItem(StorageKey.UserId);
 
       if (storedId) {
         this.userId = storedId;
@@ -43,8 +39,11 @@ export class SessionManager {
       }
 
       const newId = IdManager.create();
-      window.localStorage.setItem(LSKey.UserId, newId);
+
+      window.localStorage.setItem(StorageKey.UserId, newId);
+
       this.userId = newId;
+
       return newId;
     } catch {
       if (this.tempUserId) {
@@ -52,7 +51,9 @@ export class SessionManager {
       }
 
       const newId = IdManager.create();
+
       this.tempUserId = newId;
+
       return newId;
     }
   }
@@ -70,7 +71,6 @@ export class SessionManager {
     return this.globalMetadata;
   }
 
-  // State management
   isUserInactive(): boolean {
     const session = this.sessionHandler.getCurrentSession();
     return !session;
@@ -97,9 +97,7 @@ export class SessionManager {
     }
   }
 
-  // Session lifecycle management
   startSession(): void {
-    // Reset session end flag when starting new session
     this.sessionEndSent = false;
     this.sessionHandler.startSession();
   }
@@ -125,7 +123,6 @@ export class SessionManager {
       }
     }
 
-    // Mark that session end will be sent
     this.sessionEndSent = true;
     this.sessionHandler.endSession(sessionTrigger);
   }
@@ -136,7 +133,6 @@ export class SessionManager {
     }
   }
 
-  // Sampling
   isSampledUser(): boolean {
     const rate = this.config?.qaMode ? 1 : this.config?.samplingRate || DEFAULT_SAMPLING_RATE;
 
@@ -161,11 +157,10 @@ export class SessionManager {
   }
 
   private handleSessionData(sessionData: SessionData): void {
-    // Determine event type based on session data
     const eventType: EventType = sessionData.endTrigger ? EventType.SESSION_END : EventType.SESSION_START;
 
-    // Map trigger to string for backward compatibility
     let triggerString: string | undefined;
+
     if (sessionData.endTrigger) {
       triggerString = sessionData.endTrigger;
     }
@@ -187,7 +182,6 @@ export class SessionManager {
     }
   }
 
-  // Cleanup
   cleanup(): void {
     this.sessionHandler?.cleanup();
   }

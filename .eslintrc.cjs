@@ -18,6 +18,7 @@ module.exports = {
     'eslint:recommended',
     'plugin:unicorn/recommended',
     'plugin:@typescript-eslint/recommended',
+    'plugin:prettier/recommended',
   ],
   rules: {
     'unicorn/prevent-abbreviations': 'warn',
@@ -40,5 +41,16 @@ module.exports = {
     '@typescript-eslint/prefer-optional-chain': 'warn',
     '@typescript-eslint/prefer-nullish-coalescing': 'warn',
   },
-  ignorePatterns: ['node_modules/', 'dist/', '*.config.js', '*.config.cjs', '*.config.mjs'],
-}; 
+  ignorePatterns: [
+    'node_modules/',
+    'dist/',
+    '*.config.js',
+    '*.config.cjs',
+    '*.config.mjs',
+    '.eslintrc.cjs',
+    'playwright.config.ts',
+    'vite.config.ts',
+    'tests/**/*',
+    'scripts/**/*',
+  ],
+};

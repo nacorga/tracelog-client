@@ -1,25 +1,26 @@
-import { TracelogAppConfig, TracelogApiConfig, TracelogConfig } from '../types';
+import { AppConfig, ApiConfig, Config } from '../types';
 import { DEFAULT_TRACKING_API_CONFIG, DEFAULT_TRACKING_APP_CONFIG } from '../constants';
-import { sanitizeApiConfig } from '../utils/sanitize';
-import { validateUrl } from '../utils/validate-url';
+import { sanitizeApiConfig, isValidUrl } from '../utils';
+import packageJson from '../../package.json';
 
 interface ErrorReporter {
   reportError(error: { message: string; context?: string; severity?: 'low' | 'medium' | 'high' }): void;
 }
 
 interface ConfigLoadResult {
-  config: TracelogConfig;
+  config: Config;
   errors: string[];
   warnings: string[];
 }
 
 export class ConfigManager {
-  private id = '';
-  private readonly config: TracelogConfig = { ...DEFAULT_TRACKING_API_CONFIG, ...DEFAULT_TRACKING_APP_CONFIG };
+  private readonly config: Config = { ...DEFAULT_TRACKING_API_CONFIG, ...DEFAULT_TRACKING_APP_CONFIG };
   private readonly errorReporter: ErrorReporter;
+  private readonly maxFetchAttempts = 3;
+
+  private id = '';
   private lastFetchAttempt = 0;
   private fetchAttempts = 0;
-  private readonly maxFetchAttempts = 3;
 
   constructor(private readonly catchError: (error: { message: string; api_key?: string }) => Promise<void>) {
     this.errorReporter = {
@@ -34,17 +35,31 @@ export class ConfigManager {
     };
   }
 
-  async loadConfig(id: string, config: TracelogAppConfig): Promise<TracelogConfig> {
+  async loadConfig(id: string, config: AppConfig): Promise<Config> {
     this.id = id;
+
+    if (id === 'demo') {
+      const demoConfig: Config = {
+        ...DEFAULT_TRACKING_API_CONFIG,
+        ...config,
+        qaMode: true,
+        samplingRate: 1,
+        tags: [],
+        excludedUrlPaths: [],
+      };
+
+      return demoConfig;
+    }
+
     const result = await this.loadConfigWithValidation(id, config);
 
-    // Log warnings and errors for debugging
     if (result.warnings.length > 0) {
       console.warn('[TraceLog] Configuration warnings:', result.warnings);
     }
 
     if (result.errors.length > 0) {
       console.error('[TraceLog] Configuration errors:', result.errors);
+
       this.errorReporter.reportError({
         message: `Configuration errors: ${result.errors.join('; ')}`,
         severity: 'medium',
@@ -54,23 +69,24 @@ export class ConfigManager {
     return result.config;
   }
 
-  private async loadConfigWithValidation(id: string, config: TracelogAppConfig): Promise<ConfigLoadResult> {
+  private async loadConfigWithValidation(id: string, config: AppConfig): Promise<ConfigLoadResult> {
     const errors: string[] = [];
     const warnings: string[] = [];
-    let finalConfig: TracelogConfig = { ...DEFAULT_TRACKING_API_CONFIG, ...config };
 
-    // Validate basic configuration
+    let finalConfig: Config = { ...DEFAULT_TRACKING_API_CONFIG, ...config };
+
     try {
       const validationResult = this.validateAppConfig(config);
+
       errors.push(...validationResult.errors);
       warnings.push(...validationResult.warnings);
     } catch (error) {
       errors.push(`Failed to validate app config: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 
-    // Attempt to fetch remote configuration
     try {
       const remoteConfig = await this.fetchConfigWithRetry(config);
+
       if (remoteConfig) {
         finalConfig = { ...finalConfig, ...remoteConfig };
       } else {
@@ -80,13 +96,12 @@ export class ConfigManager {
       errors.push(`Remote config fetch failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 
-    // Final validation
     try {
       const finalValidation = this.validateFinalConfig(finalConfig);
+
       errors.push(...finalValidation.errors);
       warnings.push(...finalValidation.warnings);
 
-      // Apply corrections if needed
       finalConfig = this.applyConfigCorrections(finalConfig);
     } catch (error) {
       errors.push(`Final config validation failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -99,11 +114,10 @@ export class ConfigManager {
     };
   }
 
-  private validateAppConfig(config: TracelogAppConfig): { errors: string[]; warnings: string[] } {
+  private validateAppConfig(config: AppConfig): { errors: string[]; warnings: string[] } {
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    // Session timeout validation
     if (config.sessionTimeout !== undefined) {
       if (typeof config.sessionTimeout !== 'number') {
         errors.push('sessionTimeout must be a number');
@@ -114,14 +128,13 @@ export class ConfigManager {
       }
     }
 
-    // Global metadata validation
     if (config.globalMetadata !== undefined) {
       if (typeof config.globalMetadata !== 'object' || config.globalMetadata === null) {
         errors.push('globalMetadata must be an object');
       } else {
         const metadataSize = JSON.stringify(config.globalMetadata).length;
+
         if (metadataSize > 10_240) {
-          // 10KB
           errors.push('globalMetadata is too large (max 10KB)');
         }
 
@@ -134,11 +147,10 @@ export class ConfigManager {
     return { errors, warnings };
   }
 
-  private validateFinalConfig(config: TracelogConfig): { errors: string[]; warnings: string[] } {
+  private validateFinalConfig(config: Config): { errors: string[]; warnings: string[] } {
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    // Sampling rate validation
     if (config.samplingRate !== undefined) {
       if (typeof config.samplingRate !== 'number') {
         errors.push('samplingRate must be a number');
@@ -147,7 +159,6 @@ export class ConfigManager {
       }
     }
 
-    // Excluded URL paths validation
     if (config.excludedUrlPaths !== undefined) {
       if (Array.isArray(config.excludedUrlPaths)) {
         for (const [index, path] of config.excludedUrlPaths.entries()) {
@@ -169,10 +180,9 @@ export class ConfigManager {
     return { errors, warnings };
   }
 
-  private applyConfigCorrections(config: TracelogConfig): TracelogConfig {
+  private applyConfigCorrections(config: Config): Config {
     const correctedConfig = { ...config };
 
-    // Apply default values for invalid configs
     if (
       typeof correctedConfig.samplingRate !== 'number' ||
       correctedConfig.samplingRate < 0 ||
@@ -186,19 +196,18 @@ export class ConfigManager {
     }
 
     if (typeof correctedConfig.sessionTimeout !== 'number' || correctedConfig.sessionTimeout < 30_000) {
-      correctedConfig.sessionTimeout = 15 * 60 * 1000; // 15 minutes
+      correctedConfig.sessionTimeout = 15 * 60 * 1000;
     }
 
     return correctedConfig;
   }
 
-  private async fetchConfigWithRetry(config: TracelogAppConfig): Promise<TracelogApiConfig | null> {
+  private async fetchConfigWithRetry(config: AppConfig): Promise<ApiConfig | undefined> {
     const now = Date.now();
 
-    // Rate limiting
+    // Rate limiting (5 seconds)
     if (now - this.lastFetchAttempt < 5000) {
-      // 5 seconds
-      return null;
+      return undefined;
     }
 
     this.lastFetchAttempt = now;
@@ -209,13 +218,14 @@ export class ConfigManager {
         message: `Max fetch attempts exceeded (${this.maxFetchAttempts})`,
         severity: 'high',
       });
-      return null;
+
+      return undefined;
     }
 
     return this.fetchConfig(config);
   }
 
-  private async fetchConfig(_config: TracelogAppConfig): Promise<TracelogApiConfig | null> {
+  private async fetchConfig(_config: AppConfig): Promise<ApiConfig | undefined> {
     try {
       const configUrl = this.getConfigUrl();
 
@@ -223,21 +233,22 @@ export class ConfigManager {
         throw new Error('Config URL is not valid or not allowed');
       }
 
-      // Validate URL before making request
-      if (!validateUrl(configUrl, 'tracelog.io')) {
+      const allowedDomain = new URL(configUrl).hostname;
+
+      if (!isValidUrl(configUrl, allowedDomain)) {
         throw new Error('Config URL failed security validation');
       }
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10_000); // 10 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 10_000);
 
       const response = await fetch(configUrl, {
         method: 'GET',
+        signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
-          'User-Agent': 'TraceLog-Client/2.0.4',
+          'User-Agent': `TraceLog-Client/${packageJson.version}`,
         },
-        signal: controller.signal,
       });
 
       clearTimeout(timeoutId);
@@ -258,9 +269,8 @@ export class ConfigManager {
       }
 
       const safeData = sanitizeApiConfig(data);
-      const apiConfig = { ...DEFAULT_TRACKING_API_CONFIG, ...(safeData as TracelogApiConfig) };
+      const apiConfig = { ...DEFAULT_TRACKING_API_CONFIG, ...(safeData as ApiConfig) };
 
-      // Reset fetch attempts on success
       this.fetchAttempts = 0;
 
       return apiConfig;
@@ -281,49 +291,105 @@ export class ConfigManager {
     }
   }
 
-  private getConfigUrl(): string | null {
+  private getConfigUrl(): string | undefined {
     if (!this.id) {
-      return null;
+      return undefined;
     }
 
     try {
-      const configUrl = `https://${this.id}.tracelog.io/config`;
+      const urlParameters = new URLSearchParams(window.location.search);
+      const isQaMode = urlParameters.get('qaMode') === 'true';
+      const baseUrl = this.buildDynamicApiUrl(this.id);
 
-      // Additional validation
-      if (!validateUrl(configUrl, 'tracelog.io')) {
-        return null;
+      if (!baseUrl) {
+        return undefined;
+      }
+
+      let configUrl = `${baseUrl}/config`;
+
+      if (isQaMode) {
+        configUrl += '?qaMode=true';
+      }
+
+      const allowedDomain = new URL(baseUrl).hostname;
+
+      if (!isValidUrl(configUrl, allowedDomain)) {
+        return undefined;
       }
 
       return configUrl;
     } catch {
-      return null;
+      return undefined;
     }
   }
 
-  getApiUrl(): string | null {
-    if (!this.id) {
-      return null;
+  getApiUrl(): string | undefined {
+    if (!this.id || this.isDemoMode()) {
+      return undefined;
     }
 
     try {
-      const apiUrl = `https://${this.id}.tracelog.io/api`;
+      const apiUrl = this.buildDynamicApiUrl(this.id);
 
-      // Additional validation
-      if (!validateUrl(apiUrl, 'tracelog.io')) {
-        return null;
+      if (!apiUrl) {
+        return undefined;
+      }
+
+      const allowedDomain = new URL(apiUrl).hostname;
+
+      if (!isValidUrl(apiUrl, allowedDomain)) {
+        return undefined;
       }
 
       return apiUrl;
     } catch {
-      return null;
+      return undefined;
     }
   }
 
-  getConfig(): TracelogConfig {
+  private buildDynamicApiUrl(id: string): string | undefined {
+    try {
+      const url = new URL(window.location.href);
+      const host = url.hostname;
+      const parts = host.split('.');
+
+      if (parts.length === 0) {
+        return undefined;
+      }
+
+      const tld = parts.slice(-2).join('.');
+      const multiTlds = new Set(['co.uk', 'com.au', 'co.jp', 'co.in', 'com.br', 'com.mx']);
+
+      const cleanDomain = multiTlds.has(tld) && parts.length >= 3 ? parts.slice(-3).join('.') : tld;
+      const apiUrl = `https://${id}.${cleanDomain}`;
+
+      if (!this.validateApiUrl(apiUrl)) {
+        return undefined;
+      }
+
+      return apiUrl;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private validateApiUrl(url: string): boolean {
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }
+
+  getConfig(): Config {
     return { ...this.config };
   }
 
-  // Health check methods
+  isDemoMode(): boolean {
+    return this.id === 'demo';
+  }
+
   isHealthy(): boolean {
     return (
       this.fetchAttempts < this.maxFetchAttempts && this.config !== null && typeof this.config.samplingRate === 'number'

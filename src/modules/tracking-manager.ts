@@ -1,30 +1,30 @@
-import { TracelogConfig, EventType, TracelogEventScrollData } from '../types';
-import { ClickHandler } from '../events/click-handler';
-import { ScrollHandler, ScrollConfig } from '../events/scroll-handler';
-import { InactivityHandler, InactivityConfig, InactivityData } from '../events/inactivity-handler';
+import { Config, EventType, EventScrollData, InactivityConfig, InactivityData } from '../types';
+import { ClickHandler, ScrollHandler, ScrollConfig, InactivityHandler } from '../events';
+import { CLICK_DEBOUNCE_TIME } from '../constants';
 
 export class TrackingManager {
   private readonly scrollHandler: ScrollHandler;
   private readonly inactivityHandler: InactivityHandler;
 
+  private clickHandler?: (event: Event) => void;
+  private clickDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor(
-    private readonly config: TracelogConfig,
+    private readonly config: Config,
     private readonly handleEvent: (event: any) => void,
     private readonly handleInactivity: (isInactive: boolean) => void,
   ) {
-    // Initialize scroll handler
     const scrollConfig: ScrollConfig = {
       containerSelectors: this.config.scrollContainerSelectors,
     };
 
-    this.scrollHandler = new ScrollHandler(scrollConfig, (scrollData: TracelogEventScrollData) => {
+    this.scrollHandler = new ScrollHandler(scrollConfig, (scrollData: EventScrollData) => {
       this.handleEvent({
         evType: EventType.SCROLL,
         scrollData,
       });
     });
 
-    // Initialize inactivity handler
     const inactivityConfig: InactivityConfig = {
       timeout: this.config.sessionTimeout || 300_000, // Default 5 minutes
     };
@@ -41,41 +41,52 @@ export class TrackingManager {
   }
 
   initClickTracking(): void {
-    const handleClick = (event: Event) => {
-      const mouseEvent = event as MouseEvent;
-      const clickedElement = mouseEvent.target as HTMLElement;
+    if (this.clickHandler) {
+      // Prevent accumulating duplicate listeners
+      window.removeEventListener('click', this.clickHandler, true);
+    }
 
-      if (!clickedElement) return;
-
-      const trackingElement = ClickHandler.findTrackingElement(clickedElement);
-      const relevantClickElement = ClickHandler.getRelevantClickElement(clickedElement);
-      const coordinates = ClickHandler.calculateClickCoordinates(mouseEvent, clickedElement);
-
-      // Handle custom tracking attributes
-      if (trackingElement) {
-        const trackingData = ClickHandler.extractTrackingData(trackingElement);
-        const attributeData = ClickHandler.createCustomEventData(trackingData);
-
-        this.handleEvent({
-          evType: EventType.CUSTOM,
-          customEvent: {
-            name: attributeData.name,
-            ...(attributeData.value && { metadata: { value: attributeData.value } }),
-          },
-        });
+    this.clickHandler = (event: Event) => {
+      if (this.clickDebounceTimer) {
+        clearTimeout(this.clickDebounceTimer);
       }
 
-      // Handle regular click tracking
-      const clickData = ClickHandler.generateClickData(clickedElement, relevantClickElement, coordinates);
+      this.clickDebounceTimer = setTimeout(() => {
+        const mouseEvent = event as MouseEvent;
+        const clickedElement = mouseEvent.target as HTMLElement;
 
-      this.handleEvent({
-        evType: EventType.CLICK,
-        url: window.location.href,
-        clickData,
-      });
+        if (!clickedElement) return;
+
+        const trackingElement = ClickHandler.findTrackingElement(clickedElement);
+        const relevantClickElement = ClickHandler.getRelevantClickElement(clickedElement);
+        const coordinates = ClickHandler.calculateClickCoordinates(mouseEvent, clickedElement);
+
+        if (trackingElement) {
+          const trackingData = ClickHandler.extractTrackingData(trackingElement);
+          const attributeData = ClickHandler.createCustomEventData(trackingData);
+
+          this.handleEvent({
+            evType: EventType.CUSTOM,
+            customEvent: {
+              name: attributeData.name,
+              ...(attributeData.value && { metadata: { value: attributeData.value } }),
+            },
+          });
+        }
+
+        const clickData = ClickHandler.generateClickData(clickedElement, relevantClickElement, coordinates);
+
+        this.handleEvent({
+          evType: EventType.CLICK,
+          url: window.location.href,
+          clickData,
+        });
+
+        this.clickDebounceTimer = null;
+      }, CLICK_DEBOUNCE_TIME);
     };
 
-    window.addEventListener('click', handleClick, true);
+    window.addEventListener('click', this.clickHandler, true);
   }
 
   suppressNextScrollEvent(): void {
@@ -103,6 +114,16 @@ export class TrackingManager {
   }
 
   cleanup(): void {
+    if (this.clickHandler) {
+      window.removeEventListener('click', this.clickHandler, true);
+      this.clickHandler = undefined;
+    }
+
+    if (this.clickDebounceTimer) {
+      clearTimeout(this.clickDebounceTimer);
+      this.clickDebounceTimer = null;
+    }
+
     this.scrollHandler?.cleanup();
     this.inactivityHandler?.cleanup();
   }

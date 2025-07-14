@@ -1,20 +1,6 @@
 import { HTML_DATA_ATTR_PREFIX } from '../constants';
-import { TracelogEventClickData } from '../types';
+import { ClickCoordinates, ClickTrackingElementData, EventClickData } from '../types';
 
-export interface ClickCoordinates {
-  x: number;
-  y: number;
-  relativeX: number;
-  relativeY: number;
-}
-
-export interface TrackingElementData {
-  element: HTMLElement;
-  name: string;
-  value?: string;
-}
-
-// Move interactive selectors to class level to avoid recreation
 const INTERACTIVE_SELECTORS = [
   'button',
   'a',
@@ -58,19 +44,16 @@ export const ClickHandler = {
     const rect = element.getBoundingClientRect();
     const x = event.clientX;
     const y = event.clientY;
-
-    // Ensure coordinates are within valid bounds
     const relativeX = rect.width > 0 ? Math.max(0, Math.min(1, Number(((x - rect.left) / rect.width).toFixed(3)))) : 0;
     const relativeY = rect.height > 0 ? Math.max(0, Math.min(1, Number(((y - rect.top) / rect.height).toFixed(3)))) : 0;
 
     return { x, y, relativeX, relativeY };
   },
 
-  extractTrackingData(trackingElement: HTMLElement): TrackingElementData {
+  extractTrackingData(trackingElement: HTMLElement): ClickTrackingElementData {
     const name = trackingElement.getAttribute(`${HTML_DATA_ATTR_PREFIX}-name`);
     const value = trackingElement.getAttribute(`${HTML_DATA_ATTR_PREFIX}-value`);
 
-    // Add safety check even though it should always exist
     if (!name) {
       throw new Error('Tracking element missing required name attribute');
     }
@@ -83,35 +66,55 @@ export const ClickHandler = {
   },
 
   getRelevantText(clickedElement: HTMLElement, relevantElement: HTMLElement): string {
+    const MAX_TEXT_LENGTH = 255;
+    const LARGE_CONTAINER_TAGS = ['main', 'section', 'article', 'body', 'html', 'header', 'footer', 'aside', 'nav'];
     const clickedText = clickedElement.textContent?.trim() || '';
     const relevantText = relevantElement.textContent?.trim() || '';
 
-    // If clicked element has text and relevant doesn't, use clicked text
-    if (clickedText && !relevantText) {
+    // If no text, return empty
+    if (!clickedText && !relevantText) {
+      return '';
+    }
+
+    // Strategy 1: If clicked element has reasonable text, use it
+    if (clickedText && clickedText.length <= MAX_TEXT_LENGTH) {
       return clickedText;
     }
 
-    // If clicked text is more specific (contained within relevant text), use clicked text
-    if (clickedText && relevantText && clickedText !== relevantText && relevantText.includes(clickedText)) {
-      return clickedText;
+    // Strategy 2: For large containers with excessive text, avoid using container text
+    const isLargeContainer = LARGE_CONTAINER_TAGS.includes(relevantElement.tagName.toLowerCase());
+    const hasExcessiveText = relevantText.length > MAX_TEXT_LENGTH * 2; // 510 chars
+
+    if (isLargeContainer && hasExcessiveText) {
+      // Use clicked element text if available and reasonable, otherwise empty
+      return clickedText && clickedText.length <= MAX_TEXT_LENGTH ? clickedText : '';
     }
 
-    // Default to relevant element text
-    return relevantText;
+    // Strategy 3: Use relevant text but truncate if needed
+    if (relevantText.length <= MAX_TEXT_LENGTH) {
+      return relevantText;
+    }
+
+    // Strategy 4: If clicked text is much shorter than relevant text, prefer clicked text
+    if (clickedText && clickedText.length < relevantText.length * 0.1) {
+      return clickedText.length <= MAX_TEXT_LENGTH ? clickedText : clickedText.slice(0, MAX_TEXT_LENGTH) + '...';
+    }
+
+    // Fallback: truncate relevant text
+    return relevantText.slice(0, MAX_TEXT_LENGTH) + '...';
   },
 
   extractElementAttributes(element: HTMLElement): Record<string, string> {
-    // element.attributes always exists for HTML elements, but check length for early return
     if (element.attributes.length === 0) {
       return {};
     }
 
-    // Only extract common attributes to avoid performance issues
     const commonAttributes = ['id', 'class', 'data-testid', 'aria-label', 'title', 'href', 'type', 'name'];
     const result: Record<string, string> = {};
 
     for (const attributeName of commonAttributes) {
       const value = element.getAttribute(attributeName);
+
       if (value) {
         result[attributeName] = value;
       }
@@ -124,11 +127,10 @@ export const ClickHandler = {
     clickedElement: HTMLElement,
     relevantElement: HTMLElement,
     coordinates: ClickCoordinates,
-  ): TracelogEventClickData {
+  ): EventClickData {
     const { x, y, relativeX, relativeY } = coordinates;
     const text = this.getRelevantText(clickedElement, relevantElement);
     const attributes = this.extractElementAttributes(relevantElement);
-
     const href = relevantElement.getAttribute('href');
     const title = relevantElement.getAttribute('title');
     const alt = relevantElement.getAttribute('alt');
@@ -153,7 +155,7 @@ export const ClickHandler = {
     };
   },
 
-  createCustomEventData(trackingData: TrackingElementData): { name: string; value?: string } {
+  createCustomEventData(trackingData: ClickTrackingElementData): { name: string; value?: string } {
     return {
       name: trackingData.name,
       ...(trackingData.value && { value: trackingData.value }),
